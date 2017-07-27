@@ -25,6 +25,7 @@ SOFTWARE.
 // Cache-2-Cache ping-pong latency measurement for Win32
 // Compiled with Visual C++
 
+#include <intrin.h>
 #include <stdio.h>
 #include <windows.h>
 
@@ -48,8 +49,51 @@ DWORD WINAPI PingPongThreadProc(void *pingPongPtrs)
   return 0;
 }
 
-int main()
+DWORD WINAPI PingPongThreadProcNop(void *pingPongPtrs)
 {
+  volatile int *pPing = ((pingPongPtrs_t *)pingPongPtrs)->pPing;
+  volatile int *pPong = ((pingPongPtrs_t *)pingPongPtrs)->pPong;
+
+  *pPong = 0;
+  for (int i = 0; i < NITER; ++i)
+  {
+      while (*pPing < i)
+		  __nop();
+      *pPong = i+1;
+  }
+  return 0;
+}
+
+DWORD WINAPI PingPongThreadProcPause(void *pingPongPtrs)
+{
+  volatile int *pPing = ((pingPongPtrs_t *)pingPongPtrs)->pPing;
+  volatile int *pPong = ((pingPongPtrs_t *)pingPongPtrs)->pPong;
+
+  *pPong = 0;
+  for (int i = 0; i < NITER; ++i)
+  {
+      while (*pPing < i)
+		  _mm_pause();
+      *pPong = i+1;
+  }
+  return 0;
+}
+
+int main(int argc, const char* argv[])
+{
+  DWORD (_stdcall *pPingPongThreadProc)(void *pingPongPtrs) = PingPongThreadProc;
+  if (argc > 1 && (strncmp(argv[1], "nop", 3) == 0))
+  {
+    pPingPongThreadProc = PingPongThreadProcNop;
+	printf("Executing NOP in the loop.\n");
+  }
+
+  if (argc > 1 && (strncmp(argv[1], "pause", 5) == 0))
+  {
+    pPingPongThreadProc = PingPongThreadProcPause;
+	printf("Executing PAUSE in the loop.\n");
+  }
+
   SYSTEM_INFO si; GetSystemInfo(&si);
   if (si.dwNumberOfProcessors > 1)
   {
@@ -62,9 +106,9 @@ int main()
             int pong[32];
             pingPongPtrs_t prm1 = {ping, pong};
             pingPongPtrs_t prm2 = {pong, ping};
-            HANDLE h1 = CreateThread(NULL, 0, PingPongThreadProc,
+            HANDLE h1 = CreateThread(NULL, 0, *pPingPongThreadProc,
               &prm1, CREATE_SUSPENDED, &tid[0]);
-            HANDLE h2 = CreateThread(NULL, 0, PingPongThreadProc,
+            HANDLE h2 = CreateThread(NULL, 0, *pPingPongThreadProc,
               &prm2, CREATE_SUSPENDED, &tid[1]);
             SetThreadAffinityMask(h1, 1 << p1);
             SetThreadAffinityMask(h2, 1 << p2);
